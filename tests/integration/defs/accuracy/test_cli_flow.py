@@ -85,6 +85,14 @@ class TestGpt2(CliFlowAccuracyTestHarness):
                  extra_build_args=["--max_beam_width=256"],
                  extra_summarize_args=["--num_beams=256"])
 
+    def test_variable_beam_width_search(self, mocker):
+        mocker.patch.object(CnnDailymail, "MAX_BATCH_SIZE", 1)
+        self.run(extra_acc_spec="beam_width=8;beam_width_array=[2,3,4,5]",
+                 extra_build_args=["--max_beam_width=8"],
+                 extra_summarize_args=[
+                     "--num_beams=5", "--beam_width_array=[2,3,4,5]"
+                 ])
+
     def test_weight_streaming_ootb(self):
         self.run(extra_build_args=[
             "--gpt_attention_plugin=disable", "--weight_streaming",
@@ -421,13 +429,13 @@ class TestLlama2_7B(CliFlowAccuracyTestHarness):
     def test_tp2cp2(self):
         self.run(tp_size=2, cp_size=2)
 
-    @skip_pre_ada
+    @skip_pre_hopper
     def test_fp8_gemm_plugin(self):
         self.run(quant_algo=QuantAlgo.FP8,
                  kv_cache_quant_algo=QuantAlgo.FP8,
                  extra_build_args=["--gemm_plugin=fp8"])
 
-    @skip_pre_ada
+    @skip_pre_hopper
     @skip_post_blackwell
     def test_fp8_gemm_swiglu_plugin(self):
         # gemm_swiglu_plugin=fp8 is not supported on SM 100.
@@ -436,7 +444,7 @@ class TestLlama2_7B(CliFlowAccuracyTestHarness):
             kv_cache_quant_algo=QuantAlgo.FP8,
             extra_build_args=["--gemm_plugin=fp8", "--gemm_swiglu_plugin=fp8"])
 
-    @skip_pre_ada
+    @skip_pre_hopper
     @skip_post_blackwell
     def test_fp8_low_latency_gemm_plugin(self):
         # low_latency_gemm_plugin=fp8 is not supported on SM 100.
