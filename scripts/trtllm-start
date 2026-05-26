@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: scripts/trtllm-start MODEL [options] [trtllm-serve options]
+
+Starts trtllm-serve after preparing either a local uv virtual environment or a Docker container.
+
+Wrapper options:
+  --docker                  Run inside a TensorRT-LLM Docker container.
+  --dry-run                 Print commands without executing them.
+  --venv-dir PATH           Local virtual environment path. Default: .venv
+  --image IMAGE             Docker image. Default: ${TRTLLM_DOCKER_IMAGE:-nvcr.io/nvidia/tensorrt-llm/release:latest}
+  -h, --help                Show this help.
+
+All non-wrapper options are forwarded to trtllm-serve.
+USAGE
+}
+
+quote_cmd() {
+  printf '%q ' "$@"
+  printf '\n'
+}
+
+require_command() {
+  local name="$1"
+  if ! command -v "$name" >/dev/null 2>&1; then
+    echo "error: required command '$name' was not found" >&2
+    exit 1
+  fi
+}
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+model=""
+docker=0
+dry_run=0
+venv_dir=".venv"
+image="${TRTLLM_DOCKER_IMAGE:-nvcr.io/nvidia/tensorrt-llm/release:latest}"
+port="8000"
+host_set=0
+serve_args=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --docker)
+      docker=1
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --venv-dir)
+      venv_dir="${2:?--venv-dir requires a path}"
+      shift 2
+      ;;
+    --image)
+      image="${2:?--image requires an image}"
+      shift 2
+      ;;
+    --port)
+      port="${2:?--port requires a value}"
+      serve_args+=("$1" "$2")
+      shift 2
+      ;;
+    --host)
+      host_set=1
+      serve_args+=("$1" "${2:?--host requires a value}")
+      shift 2
+      ;;
+    --)
+      shift
+      serve_args+=("$@")
+      break
+      ;;
+    -*)
+      serve_args+=("$1")
+      shift
+      ;;
+    *)
+      if [[ -z "$model" ]]; then
+        model="$1"
+      else
+        serve_args+=("$1")
+      fi
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$model" ]]; then
+  usage
+  exit 2
+fi
+
+server_args=("$model")
+server_args+=("${serve_args[@]}")
+if [[ "$docker" -eq 1 && "$host_set" -eq 0 ]]; then
+  server_args+=("--host" "0.0.0.0")
+fi
+
+if [[ "$docker" -eq 0 ]]; then
+  venv_python="$repo_root/$venv_dir/bin/python"
+  trtllm_serve="$repo_root/$venv_dir/bin/trtllm-serve"
+  local_commands=(
+    "uv venv $(printf '%q' "$repo_root/$venv_dir")"
+    "uv pip install --python $(printf '%q' "$venv_python") -e $(printf '%q' "$repo_root")"
+    "$(quote_cmd "$trtllm_serve" "${server_args[@]}")"
+  )
+  if [[ "$dry_run" -eq 1 ]]; then
+    printf '%s\n' "${local_commands[@]}"
+    exit 0
+  fi
+  require_command uv
+  if [[ "${TRTLLM_START_SKIP_ENV_CHECKS:-0}" != "1" ]]; then
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+      echo "error: nvidia-smi was not found; TensorRT-LLM serving requires an NVIDIA GPU" >&2
+      exit 1
+    fi
+  fi
+  uv venv "$repo_root/$venv_dir"
+  uv pip install --python "$venv_python" -e "$repo_root"
+  exec "$trtllm_serve" "${server_args[@]}"
+fi
+
+container_repo="/workspace/TensorRT-LLM"
+container_cmd="python3 -m pip install -e $container_repo && trtllm-serve $(quote_cmd "${server_args[@]}")"
+docker_cmd=(
+  docker run --rm -it
+  --ipc host
+  --gpus all
+  --ulimit memlock=-1
+  --ulimit stack=67108864
+  -p "$port:$port"
+  -v "$repo_root:$container_repo"
+  -v "${HF_HOME:-$HOME/.cache/huggingface}:/root/.cache/huggingface"
+  -w "$container_repo"
+  "$image"
+  bash -lc "$container_cmd"
+)
+
+if [[ "$dry_run" -eq 1 ]]; then
+  quote_cmd "${docker_cmd[@]}"
+  printf 'container command: %s\n' "$container_cmd"
+  exit 0
+fi
+
+require_command docker
+exec "${docker_cmd[@]}"

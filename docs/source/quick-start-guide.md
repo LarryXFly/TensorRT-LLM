@@ -9,6 +9,30 @@ This is the starting point to try out TensorRT LLM. Specifically, this Quick Sta
 
 Follow the [Installation Guide](installation/installation-guide) to set up TensorRT LLM. The quickest option is to pull and run the pre-built release container from NGC.
 
+## Local Development Start with trtllm-start
+
+For local development, you can use `scripts/trtllm-start` from a TensorRT LLM
+checkout to create a `uv` virtual environment, install TensorRT LLM, and start
+`trtllm-serve`:
+
+```bash
+./scripts/trtllm-start Qwen/Qwen3-8B --port 8000
+```
+
+The wrapper keeps `trtllm-serve` as the actual server command and forwards
+serving options directly. For example, you can pass a YAML serving config using
+the existing `trtllm-serve --config` flag:
+
+```bash
+./scripts/trtllm-start Qwen/Qwen3-8B --config /path/to/config.yaml --port 8000
+```
+
+To use the TensorRT LLM container path instead of a local virtual environment:
+
+```bash
+./scripts/trtllm-start Qwen/Qwen3-8B --docker --port 8000
+```
+
 (deploy-with-trtllm-serve)=
 ## Deploy Online Serving with trtllm-serve
 
